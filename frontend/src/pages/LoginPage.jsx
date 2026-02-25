@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { login } from "@/services/authService";
+import { login, googleLogin } from "@/services/authService";
 import { Loader2 } from "lucide-react";
+import { GoogleLogin } from "@react-oauth/google";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -26,6 +27,23 @@ export default function LoginPage() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleGoogleSuccess = async (credentialResponse) => {
+        setLoading(true);
+        setError("");
+        try {
+            await googleLogin(credentialResponse.credential);
+            navigate("/");
+        } catch (err) {
+            setError(err.response?.data?.detail || "Google login failed.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGoogleError = () => {
+        setError("Google login failed. Please try again.");
     };
 
     return (
@@ -75,6 +93,27 @@ export default function LoginPage() {
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Sign In
                         </Button>
+
+                        <div className="relative w-full">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t border-slate-200 dark:border-slate-800"></span>
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-white dark:bg-slate-950 px-2 text-muted-foreground">Or continue with</span>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-center w-full">
+                            <GoogleLogin
+                                onSuccess={handleGoogleSuccess}
+                                onError={handleGoogleError}
+                                useOneTap
+                                theme="outline"
+                                shape="pill"
+                                width="100%"
+                            />
+                        </div>
+
                         <div className="text-center text-sm text-muted-foreground">
                             Don&apos;t have an account?{" "}
                             <Link to="/signup" className="text-primary hover:underline font-medium">

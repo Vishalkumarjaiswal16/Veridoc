@@ -30,6 +30,7 @@ DATABASE_NAME = os.getenv("DATABASE_NAME", "veridoc")
 JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-here-change-in-production")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRATION_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "1440")) # 24 hours
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
