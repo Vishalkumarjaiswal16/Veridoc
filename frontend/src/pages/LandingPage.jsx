@@ -88,20 +88,6 @@ const LandingPage = () => {
                                 Join thousands of users who trust Veridoc for their document needs.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="flex flex-col items-center pb-12">
-                            <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md justify-center">
-                                <Link to="/signup">
-                                    <Button size="lg" variant="secondary" className="w-full sm:w-auto px-10 font-bold">
-                                        Sign Up Now
-                                    </Button>
-                                </Link>
-                                <Link to="/login">
-                                    <Button size="lg" variant="outline" className="w-full sm:w-auto px-10 border-primary-foreground hover:bg-primary-foreground hover:text-primary transition-colors font-bold">
-                                        Sign In
-                                    </Button>
-                                </Link>
-                            </div>
-                        </CardContent>
                     </Card>
                 </div>
             </section>
