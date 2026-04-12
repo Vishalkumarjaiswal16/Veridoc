@@ -1,13 +1,22 @@
 import boto3
 import json
 import tiktoken
+import time
+from botocore.config import Config
 from langchain.embeddings.base import Embeddings
 from langchain_chroma import Chroma
 import os
 
 class AmazonTitanEmbedding(Embeddings):
     def __init__(self, region_name="eu-west-3", model_id="amazon.titan-embed-text-v2:0"):
-        self.client = boto3.client("bedrock-runtime", region_name=region_name)
+        # Setup advanced AWS retries and rate limit handling (adaptive mode)
+        retry_config = Config(
+            retries={
+                "max_attempts": 10,
+                "mode": "adaptive"
+            }
+        )
+        self.client = boto3.client("bedrock-runtime", region_name=region_name, config=retry_config)
         self.model_id = model_id
         self.max_tokens = 8000
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -31,6 +40,8 @@ class AmazonTitanEmbedding(Embeddings):
                 safe_text = self._safe_truncate(text)
                 embedding = self.embed_query(safe_text)
                 embeddings.append(embedding)
+                # Small sleep to avoid hitting Bedrock TPS (Transactions Per Second) limits on large PDFs
+                time.sleep(0.1)
             except Exception as e:
                 print(f"[Warning] Skipping text #{i} due to error: {e}")
         return embeddings
