@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/.venv # Don't overwrite the venv inside the container
+    env_file:
+      - ./backend/.env
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    networks:
+      - veridoc-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Don't overwrite node_modules inside the container
+    env_file:
+      - ./frontend/.env
+    environment:
+      - VITE_API_TARGET=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - veridoc-network
+
+networks:
+  veridoc-network:
+    driver: bridge
