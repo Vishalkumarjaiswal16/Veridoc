@@ -3,7 +3,7 @@ import os
 import tempfile
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Any
 
 from fastapi import UploadFile, BackgroundTasks
 from langchain_community.document_loaders import PyPDFLoader
@@ -13,7 +13,7 @@ from services.bedrock_service import vector_store
 from models.database import get_database
 
 class DocumentService:
-    async def enqueue_process_and_index(self, file: UploadFile, user_id: str, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    async def enqueue_process_and_index(self, file: UploadFile, user_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
         temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
         doc_id = str(uuid.uuid4())
         db = get_database()
@@ -54,9 +54,16 @@ class DocumentService:
                 pass
             raise
 
-    async def get_document_status(self, document_id: str) -> Dict[str, Any]:
+    async def get_document_status(self, document_id: str) -> dict[str, Any]:
         db = get_database()
-        doc = await db.documents.find_one({"_id": document_id}, {"chunk_ids": 0, "user_id": 0})
+        doc = await db.documents.find_one({"_id": document_id}, {
+            "filename": 1,
+            "status": 1,
+            "processed_chunks": 1,
+            "chunk_count": 1,
+            "created_at": 1,
+            "error": 1
+        })
         if doc and isinstance(doc.get("created_at"), datetime):
             doc["created_at"] = doc["created_at"].isoformat()
         return doc
@@ -116,6 +123,16 @@ class DocumentService:
                 await asyncio.to_thread(vector_store.add_documents, documents=batch_texts, ids=uuids)
                 all_uuids.extend(uuids)
                 total_chunks_processed += len(batch_texts)
+                
+                checkpoint_res = await db.documents.update_one(
+                    {"_id": doc_id}, 
+                    {
+                        "$set": {"processed_chunks": total_chunks_processed},
+                        "$push": {"chunk_ids": {"$each": uuids}}
+                    }
+                )
+                if checkpoint_res.matched_count == 0:
+                    raise Exception("Document was deleted mid-flight. Aborting.")
             
             # Mark completely done
             final_res = await db.documents.update_one(
@@ -123,8 +140,7 @@ class DocumentService:
                 {"$set": {
                     "status": "processed", 
                     "processed_chunks": total_chunks_processed,
-                    "chunk_count": total_chunks_processed,
-                    "chunk_ids": all_uuids
+                    "chunk_count": total_chunks_processed
                 }}
             )
             if final_res.matched_count == 0:
@@ -145,7 +161,7 @@ class DocumentService:
             except Exception as cleanup_error:
                 print(f"Failed to clean up temp file: {cleanup_error}")
 
-    async def get_all_documents(self) -> List[Dict[str, Any]]:
+    async def get_all_documents(self) -> list[dict[str, Any]]:
         db = get_database()
         cursor = db.documents.find({})
         docs = []
