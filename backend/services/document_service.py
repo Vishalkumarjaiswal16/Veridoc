@@ -56,7 +56,7 @@ class DocumentService:
 
     async def get_document_status(self, document_id: str) -> Dict[str, Any]:
         db = get_database()
-        doc = await db.documents.find_one({"_id": document_id})
+        doc = await db.documents.find_one({"_id": document_id}, {"chunk_ids": 0, "user_id": 0})
         if doc and isinstance(doc.get("created_at"), datetime):
             doc["created_at"] = doc["created_at"].isoformat()
         return doc
@@ -95,10 +95,15 @@ class DocumentService:
                     total_chunks_processed += len(batch_texts)
                     
                     # Checkpoint state to MongoDB
-                    await db.documents.update_one(
+                    checkpoint_res = await db.documents.update_one(
                         {"_id": doc_id}, 
-                        {"$set": {"processed_chunks": total_chunks_processed, "chunk_ids": all_uuids}}
+                        {
+                            "$set": {"processed_chunks": total_chunks_processed},
+                            "$push": {"chunk_ids": {"$each": uuids}}
+                        }
                     )
+                    if checkpoint_res.matched_count == 0:
+                        raise Exception("Document was deleted mid-flight. Aborting.")
                     batch_texts = []
                     
             # Process remaining edge chunks
@@ -113,7 +118,7 @@ class DocumentService:
                 total_chunks_processed += len(batch_texts)
             
             # Mark completely done
-            await db.documents.update_one(
+            final_res = await db.documents.update_one(
                 {"_id": doc_id}, 
                 {"$set": {
                     "status": "processed", 
@@ -122,6 +127,8 @@ class DocumentService:
                     "chunk_ids": all_uuids
                 }}
             )
+            if final_res.matched_count == 0:
+                raise Exception("Document was deleted mid-flight. Aborting.")
 
         except Exception as e:
             print(f"Background processing error: {e}")
