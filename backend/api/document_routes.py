@@ -18,11 +18,11 @@ async def upload_document(
     admin_user: dict = Depends(verify_admin),
 ):
     """Upload and queue a document for indexing into ChromaDB."""
+    # Validate file type
+    if not file.filename.lower().endswith(".pdf"):
+         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+         
     try:
-        # Validate file type
-        if not file.filename.lower().endswith(".pdf"):
-             raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-             
         info = await document_service.enqueue_process_and_index(
             file=file, 
             user_id=admin_user["_id"],
@@ -35,7 +35,7 @@ async def upload_document(
             "message": "Document is processing in the background."
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal server error while processing the document.")
 
 @router.get("/{document_id}/status")
 async def get_document_status(document_id: str, admin_user: dict = Depends(verify_admin)):

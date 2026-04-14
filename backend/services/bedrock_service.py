@@ -39,8 +39,7 @@ class AmazonTitanEmbedding(Embeddings):
         embeddings = [None] * len(texts)
         
         def _process_item(index, text):
-            safe_text = self._safe_truncate(text)
-            return index, self.embed_query(safe_text)
+            return index, self.embed_query(text)
                 
         # Boto3 client's adaptive retry handles HTTP 429 backoff gracefully
         # Using a ThreadPoolExecutor dramatically reduces the per-chunk overhead
@@ -52,7 +51,7 @@ class AmazonTitanEmbedding(Embeddings):
                     embeddings[index] = embedding_result
                 except Exception as e:
                     print(f"[Error] Failed to embed chunk: {e}")
-                    raise e
+                    raise
                     
         return embeddings
 

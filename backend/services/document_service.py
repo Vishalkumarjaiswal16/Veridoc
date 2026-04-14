@@ -14,32 +14,44 @@ from models.database import get_database
 class DocumentService:
     async def enqueue_process_and_index(self, file: UploadFile, user_id: str, background_tasks: Any) -> Dict[str, Any]:
         temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
-        with os.fdopen(temp_fd, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
         doc_id = str(uuid.uuid4())
         db = get_database()
         
-        document_metadata = {
-            "_id": doc_id,
-            "filename": file.filename,
-            "user_id": user_id,
-            "chunk_count": 0,
-            "processed_chunks": 0,
-            "created_at": datetime.now(timezone.utc),
-            "status": "queued",
-            "content_type": file.content_type,
-            "chunk_ids": []
-        }
-        await db.documents.insert_one(document_metadata)
-        
-        background_tasks.add_task(self._process_pdf_background, doc_id, temp_path, file.filename)
-        
-        return {
-            "id": doc_id,
-            "filename": file.filename
-        }
+        try:
+            with os.fdopen(temp_fd, "wb") as f:
+                while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                    f.write(chunk)
+            
+            document_metadata = {
+                "_id": doc_id,
+                "filename": file.filename,
+                "user_id": user_id,
+                "chunk_count": 0,
+                "processed_chunks": 0,
+                "created_at": datetime.now(timezone.utc),
+                "status": "queued",
+                "content_type": file.content_type,
+                "chunk_ids": []
+            }
+            await db.documents.insert_one(document_metadata)
+            
+            background_tasks.add_task(self._process_pdf_background, doc_id, temp_path, file.filename)
+            
+            return {
+                "id": doc_id,
+                "filename": file.filename
+            }
+        except Exception:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            try:
+                await db.documents.delete_one({"_id": doc_id})
+            except Exception:
+                pass
+            raise
 
     async def get_document_status(self, document_id: str) -> Dict[str, Any]:
         db = get_database()
