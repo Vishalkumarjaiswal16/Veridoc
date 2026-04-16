@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+import asyncio
 import uuid
 
 from services.bedrock_service import get_bedrock_response
@@ -74,6 +75,18 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         # for Bedrock context just as before to keep compatibility.
         history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
         
+        # Race condition guard: compute all status counts in a single atomic query
+        # to avoid inconsistency from separate round-trips
+        status_counts = {}
+        async for doc in db.documents.aggregate([
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+        ]):
+            status_counts[doc["_id"]] = doc["count"]
+        total_docs = sum(status_counts.values())
+        processed_docs = status_counts.get("processed", 0)
+        processing_docs = status_counts.get("queued", 0) + status_counts.get("processing", 0)
+        failed_docs = status_counts.get("failed", 0)
+
         # User message dict
         user_msg = {
             "id": str(uuid.uuid4()),
@@ -91,7 +104,19 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
             }
         )
 
-        response_text = get_bedrock_response(request.message, history_dicts)
+        # If documents exist but none are processed yet, short-circuit with a helpful message
+        if total_docs > 0 and processed_docs == 0 and processing_docs > 0:
+            response_text = (
+                f"Your documents are still being processed ({processing_docs} in queue). "
+                "Please wait a moment and try again once processing is complete."
+            )
+        elif total_docs > 0 and processed_docs == 0 and failed_docs > 0:
+            response_text = (
+                f"Some documents failed to process ({failed_docs} failed). "
+                "Please re-upload them and try again."
+            )
+        else:
+            response_text = await asyncio.to_thread(get_bedrock_response, request.message, history_dicts)
 
         bot_msg = {
             "id": str(uuid.uuid4()),
