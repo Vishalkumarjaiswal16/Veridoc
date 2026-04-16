@@ -22,6 +22,11 @@ TOP_K = int(os.getenv("TOP_K", "4"))
 RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "0.55"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "10"))
 
+if not 0.0 <= RELEVANCE_THRESHOLD <= 1.0:
+    raise ValueError(f"RELEVANCE_THRESHOLD must be in [0, 1], got {RELEVANCE_THRESHOLD}")
+if RAG_TOP_K < 1:
+    raise ValueError(f"RAG_TOP_K must be >= 1, got {RAG_TOP_K}")
+
 # API Configuration
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")

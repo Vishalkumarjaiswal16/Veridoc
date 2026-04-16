@@ -1,11 +1,14 @@
 import boto3
 import json
+import logging
 import tiktoken
 import time
 from botocore.config import Config
 from langchain.embeddings.base import Embeddings
 from langchain_chroma import Chroma
 import os
+
+logger = logging.getLogger(__name__)
 
 class AmazonTitanEmbedding(Embeddings):
     def __init__(self, region_name="eu-west-3", model_id="amazon.titan-embed-text-v2:0"):
@@ -50,7 +53,7 @@ class AmazonTitanEmbedding(Embeddings):
                     index, embedding_result = future.result()
                     embeddings[index] = embedding_result
                 except Exception as e:
-                    print(f"[Error] Failed to embed chunk: {e}")
+                    logger.error("Failed to embed chunk: %s", e)
                     raise
                     
         return embeddings
@@ -93,11 +96,11 @@ def get_bedrock_response(question, chat_history=None):
     # similarity = 1 - (distance / 2) maps to [0, 1] where 1 = identical
     docs_with_scores = [(doc, 1.0 - dist / 2.0) for doc, dist in docs_with_distances]
 
-    # Debug logging for retrieval diagnostics
-    print(f"[RAG] Query: '{question[:60]}' -> {len(docs_with_scores)} results")
+    # Debug logging for retrieval diagnostics (gated behind DEBUG level for privacy)
+    logger.debug("RAG query: '%s' -> %d results", question[:60], len(docs_with_scores))
     for doc, score in docs_with_scores:
         source = doc.metadata.get('source_filename', 'N/A')
-        print(f"  Similarity={score:.4f} | Source={source} | {doc.page_content[:80]}...")
+        logger.debug("  Similarity=%.4f | Source=%s", score, source)
 
     # Filter out low-relevance results and deduplicate by content
     seen_content = set()
@@ -109,7 +112,7 @@ def get_bedrock_response(question, chat_history=None):
             seen_content.add(content_key)
     docs_from_vector_store = [doc for doc, _ in relevant_docs]
 
-    print(f"[RAG] {len(relevant_docs)} unique docs above threshold ({RELEVANCE_THRESHOLD})")
+    logger.info("RAG retrieval: %d unique docs above threshold (%.2f)", len(relevant_docs), RELEVANCE_THRESHOLD)
 
     # Early return if no relevant context — saves an LLM call
     if not docs_from_vector_store:

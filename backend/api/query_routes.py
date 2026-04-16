@@ -74,10 +74,16 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         # for Bedrock context just as before to keep compatibility.
         history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
         
-        # Race condition guard: check if any documents are ready for querying
-        total_docs = await db.documents.count_documents({})
-        processed_docs = await db.documents.count_documents({"status": "processed"})
-        processing_docs = await db.documents.count_documents({"status": {"$in": ["queued", "processing"]}})
+        # Race condition guard: compute all status counts in a single atomic query
+        # to avoid inconsistency from separate round-trips
+        status_counts = {}
+        async for doc in db.documents.aggregate([
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}}
+        ]):
+            status_counts[doc["_id"]] = doc["count"]
+        total_docs = sum(status_counts.values())
+        processed_docs = status_counts.get("processed", 0)
+        processing_docs = status_counts.get("queued", 0) + status_counts.get("processing", 0)
 
         # User message dict
         user_msg = {
