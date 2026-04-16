@@ -60,9 +60,10 @@ embeddings = AmazonTitanEmbedding()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 vector_store = Chroma(
-    collection_name="example_collection",
+    collection_name="veridoc_cosine",
     embedding_function=embeddings,
     persist_directory=os.path.join(BASE_DIR, "chroma_vectorestore"),
+    collection_metadata={"hnsw:space": "cosine"},
 )
 
 client = boto3.client("bedrock-runtime", region_name="eu-west-3")
@@ -81,7 +82,48 @@ def _format_chat_history(chat_history):
     return "\n".join(formatted_messages)
 
 def get_bedrock_response(question, chat_history=None):
-    docs_from_vector_store = vector_store.similarity_search(question, k=3)
+    from config import RELEVANCE_THRESHOLD, RAG_TOP_K
+
+    # Use similarity_search_with_score which returns raw distances
+    # The existing collection uses L2 distance where values can exceed 1.0
+    # Lower distance = more similar (0 = identical)
+    docs_with_distances = vector_store.similarity_search_with_score(question, k=RAG_TOP_K)
+
+    # Convert cosine distance to similarity: cosine distance is in [0, 2]
+    # similarity = 1 - (distance / 2) maps to [0, 1] where 1 = identical
+    docs_with_scores = [(doc, 1.0 - dist / 2.0) for doc, dist in docs_with_distances]
+
+    # Debug logging for retrieval diagnostics
+    print(f"[RAG] Query: '{question[:60]}' -> {len(docs_with_scores)} results")
+    for doc, score in docs_with_scores:
+        source = doc.metadata.get('source_filename', 'N/A')
+        print(f"  Similarity={score:.4f} | Source={source} | {doc.page_content[:80]}...")
+
+    # Filter out low-relevance results and deduplicate by content
+    seen_content = set()
+    relevant_docs = []
+    for doc, score in docs_with_scores:
+        content_key = doc.page_content[:200]
+        if score >= RELEVANCE_THRESHOLD and content_key not in seen_content:
+            relevant_docs.append((doc, score))
+            seen_content.add(content_key)
+    docs_from_vector_store = [doc for doc, _ in relevant_docs]
+
+    print(f"[RAG] {len(relevant_docs)} unique docs above threshold ({RELEVANCE_THRESHOLD})")
+
+    # Early return if no relevant context — saves an LLM call
+    if not docs_from_vector_store:
+        return (
+            "I couldn't find any relevant information in the uploaded documents for your question. "
+            "Please make sure the relevant documents have been uploaded and fully processed."
+        )
+
+    # Format context as clean text instead of raw Document __repr__
+    context_text = "\n\n---\n\n".join(
+        f"[Source: {doc.metadata.get('source_filename', 'Unknown')}]\n{doc.page_content}"
+        for doc in docs_from_vector_store
+    )
+
     conversation_history = _format_chat_history(chat_history)
 
     prompt = f"""
@@ -94,7 +136,7 @@ def get_bedrock_response(question, chat_history=None):
     {conversation_history}
 
     Context:
-    {docs_from_vector_store}
+    {context_text}
 
     User's Question:
     {question}
@@ -121,3 +163,4 @@ def get_bedrock_response(question, chat_history=None):
     response = client.invoke_model(modelId=MODEL_ID, body=json.dumps(ige_native_request))
     result = json.loads(response["body"].read())
     return result["output"]["message"]["content"][0]["text"]
+

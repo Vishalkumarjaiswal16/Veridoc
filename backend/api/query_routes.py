@@ -74,6 +74,11 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
         # for Bedrock context just as before to keep compatibility.
         history_dicts = [{"role": msg.role, "content": msg.content} for msg in request.history]
         
+        # Race condition guard: check if any documents are ready for querying
+        total_docs = await db.documents.count_documents({})
+        processed_docs = await db.documents.count_documents({"status": "processed"})
+        processing_docs = await db.documents.count_documents({"status": {"$in": ["queued", "processing"]}})
+
         # User message dict
         user_msg = {
             "id": str(uuid.uuid4()),
@@ -91,7 +96,14 @@ async def chat_endpoint(request: ChatRequest, current_user: dict = Depends(get_c
             }
         )
 
-        response_text = get_bedrock_response(request.message, history_dicts)
+        # If documents exist but none are processed yet, short-circuit with a helpful message
+        if total_docs > 0 and processed_docs == 0 and processing_docs > 0:
+            response_text = (
+                f"Your documents are still being processed ({processing_docs} in queue). "
+                "Please wait a moment and try again once processing is complete."
+            )
+        else:
+            response_text = get_bedrock_response(request.message, history_dicts)
 
         bot_msg = {
             "id": str(uuid.uuid4()),
