@@ -10,33 +10,38 @@ async def reset_documents():
         # 1. Find processed documents to clean up their vectors first
         cursor = db.documents.find({"status": "processed"})
         
-        successful_docs = []
+        reset_count = 0
         async for doc in cursor:
             chunk_ids = doc.get("chunk_ids", [])
             success = True
             if chunk_ids:
                 try:
-                    await asyncio.to_thread(vector_store.delete, ids=chunk_ids)
+                    await asyncio.wait_for(
+                        asyncio.to_thread(vector_store.delete, ids=chunk_ids), 
+                        timeout=30.0
+                    )
                     print(f"Deleted {len(chunk_ids)} chunks from ChromaDB for document {doc.get('filename', doc['_id'])}.")
+                except asyncio.TimeoutError:
+                    print(f"Warning: Deletion timed out for {doc.get('filename')}")
+                    success = False
                 except Exception as e:
                     print(f"Warning: Failed to delete chunks for {doc.get('filename')}: {e}")
                     success = False
             
             if success:
-                successful_docs.append(doc["_id"])
+                await db.documents.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {
+                        "status": "uploaded",
+                        "chunk_ids": [],
+                        "chunk_count": 0,
+                        "processed_chunks": 0
+                    }}
+                )
+                reset_count += 1
 
-        if successful_docs:
-            # 2. Reset the database statuses only for docs that successfully cleaned up
-            result = await db.documents.update_many(
-                {"_id": {"$in": successful_docs}},
-                {"$set": {
-                    "status": "uploaded",
-                    "chunk_ids": [],
-                    "chunk_count": 0,
-                    "processed_chunks": 0
-                }}
-            )
-            print(f"Reset {result.modified_count} documents to 'uploaded' state and cleared their metadata.")
+        if reset_count > 0:
+            print(f"Reset {reset_count} documents to 'uploaded' state and cleared their metadata.")
         else:
             print("No documents were reset.")
     finally:
